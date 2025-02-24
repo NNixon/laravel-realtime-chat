@@ -1,0 +1,23 @@
+{
+    "name": "nnixon/laravel-realtime-chat",
+    "description": "Real-time chat package for Laravel with authentication",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "NNixon\\LaravelRealtimeChat\\": "src/"
+        }
+    },
+    "require": {
+        "php": "^8.1",
+        "laravel/framework": "^10.0",
+        "pusher/pusher-php-server": "^7.0"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "NNixon\\LaravelRealtimeChat\\ChatServiceProvider"
+            ]
+        }
+    }
+}
