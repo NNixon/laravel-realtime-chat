@@ -11,7 +11,13 @@ class ChatController extends Controller
 {
     public function index()
     {
-        $users = config('auth.providers.users.model')::where('id', '!=', auth()->id())->get();
+        $userModel = config('chat.user_model');
+        $displayName = config('chat.user_display_name');
+        
+        $users = $userModel::where('id', '!=', auth()->id())
+            ->select('id', $displayName)
+            ->get();
+            
         return view('laravel-chat::index', compact('users'));
     }
 
@@ -23,7 +29,10 @@ class ChatController extends Controller
         })->orWhere(function($query) use ($userId) {
             $query->where('user_id', $userId)
                   ->where('receiver_id', auth()->id());
-        })->with('sender')->get();
+        })
+        ->with('sender')
+        ->latest()
+        ->paginate(config('chat.messages_per_page'));
 
         return response()->json($messages);
     }
@@ -32,7 +41,7 @@ class ChatController extends Controller
     {
         $request->validate([
             'receiver_id' => 'required|exists:users,id',
-            'message' => 'required|string'
+            'message' => 'required|string|max:' . config('chat.max_message_length')
         ]);
 
         $message = Message::create([
@@ -41,7 +50,9 @@ class ChatController extends Controller
             'message' => $request->message
         ]);
 
-        broadcast(new MessageSent($message))->toOthers();
+        if (config('chat.broadcast_driver') === 'pusher') {
+            broadcast(new MessageSent($message))->toOthers();
+        }
 
         return response()->json($message);
     }

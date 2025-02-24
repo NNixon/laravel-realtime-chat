@@ -10,7 +10,7 @@
                     <ul class="list-group" id="users-list">
                         @foreach($users as $user)
                             <li class="list-group-item user-item" data-user-id="{{ $user->id }}">
-                                {{ $user->name }}
+                                {{ $user->{config('chat.user_display_name')} }}
                             </li>
                         @endforeach
                     </ul>
@@ -24,7 +24,11 @@
                     <div id="messages" style="height: 300px; overflow-y: scroll;"></div>
                     <form id="message-form" class="mt-3">
                         <div class="input-group">
-                            <input type="text" class="form-control" id="message-input" placeholder="Type your message...">
+                            <input type="text" 
+                                   class="form-control" 
+                                   id="message-input" 
+                                   placeholder="Type your message..."
+                                   maxlength="{{ config('chat.max_message_length') }}">
                             <button class="btn btn-primary" type="submit">Send</button>
                         </div>
                     </form>
@@ -37,20 +41,35 @@
 @push('scripts')
 <script>
     let currentReceiverId = null;
+    const config = @json([
+        'refreshInterval' => config('chat.ui.refresh_interval'),
+        'typingIndicator' => config('chat.typing_indicator'),
+        'notifications' => config('chat.notifications'),
+        'timezone' => config('chat.ui.timezone'),
+        'dateFormat' => config('chat.ui.date_format'),
+        'enableEmojis' => config('chat.ui.enable_emojis'),
+        'theme' => config('chat.ui.theme'),
+    ]);
 
-    // Initialize Pusher
+    // Initialize Pusher if using Pusher driver
+    @if(config('chat.broadcast_driver') === 'pusher')
     const pusher = new Pusher('{{ config('broadcasting.connections.pusher.key') }}', {
         cluster: '{{ config('broadcasting.connections.pusher.options.cluster') }}',
         encrypted: true
     });
 
-    // Subscribe to private channel
-    const channel = pusher.subscribe('presence-chat.' + {{ auth()->id() }});
+    const channel = pusher.subscribe('{{ config('chat.presence_channel_name') }}.' + {{ auth()->id() }});
     channel.bind('message-sent', function(data) {
         if (currentReceiverId === data.message.user_id) {
             appendMessage(data.message);
+            
+            // Show notification if enabled
+            if (config.notifications.enabled && config.notifications.desktop) {
+                showNotification(data.message);
+            }
         }
     });
+    @endif
 
     // Load messages when clicking on a user
     $('.user-item').click(function() {
@@ -80,24 +99,64 @@
 
     function loadMessages(userId) {
         $('#messages').empty();
-        $.get(`/chat/messages/${userId}`)
-            .done(function(messages) {
-                messages.forEach(appendMessage);
+        $.get(`/{{ config('chat.route_prefix') }}/messages/${userId}`)
+            .done(function(response) {
+                response.data.forEach(appendMessage);
             });
     }
 
     function appendMessage(message) {
         const isOwn = message.user_id === {{ auth()->id() }};
+        const formattedDate = formatDate(message.created_at);
+        
         const html = `
             <div class="message ${isOwn ? 'text-right' : 'text-left'} mb-2">
-                <small class="text-muted">${message.sender.name}</small>
+                <small class="text-muted">${message.sender.${config('chat.user_display_name')}} - ${formattedDate}</small>
                 <div class="p-2 rounded ${isOwn ? 'bg-primary text-white' : 'bg-light'}">
-                    ${message.message}
+                    ${config.enableEmojis ? convertEmojis(message.message) : message.message}
                 </div>
             </div>
         `;
         $('#messages').append(html);
         $('#messages').scrollTop($('#messages')[0].scrollHeight);
+        
+        // Play sound if enabled
+        if (!isOwn && config.notifications.enabled && config.notifications.sound) {
+            playNotificationSound();
+        }
+    }
+
+    function formatDate(date) {
+        return moment(date).tz(config.timezone).format(config.dateFormat);
+    }
+
+    function showNotification(message) {
+        if ("Notification" in window && Notification.permission === "granted") {
+            new Notification(`New message from ${message.sender.${config('chat.user_display_name')}}`, {
+                body: message.message
+            });
+        }
+    }
+
+    // Optional: Add emoji support if enabled
+    if (config.enableEmojis) {
+        function convertEmojis(text) {
+            return text.replace(/:\w+:/g, match => emojis[match] || match);
+        }
+    }
+
+    // Apply theme
+    if (config.theme !== 'auto') {
+        document.body.classList.toggle('dark-theme', config.theme === 'dark');
+    }
+
+    // Auto-refresh messages
+    if (config.refreshInterval > 0) {
+        setInterval(() => {
+            if (currentReceiverId) {
+                loadMessages(currentReceiverId);
+            }
+        }, config.refreshInterval * 1000);
     }
 </script>
 @endpush
